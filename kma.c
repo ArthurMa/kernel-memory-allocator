@@ -106,7 +106,7 @@ void fail();
 
 /**************Implementation***********************************************/
 
-int anyMismatches = 0;
+int anyMismatches = 0;    
 
 int currentAllocBytes = 0;
 

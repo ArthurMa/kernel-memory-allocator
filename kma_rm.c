@@ -51,22 +51,24 @@
  */
 
 typedef struct {
-	int size;
-	blk_ptr_t* prev;
-	blk_ptr_t* next;
+  int size;
+  void* next;
 } blk_ptr_t;
 
 typedef struct {
-//	kma_page_t* this;
-	blk_ptr_t* free_list;
-	int allocated_block;
+  void* this;
+  blk_ptr_t* free_list;
+  int allocated_block;
+  int freed_block;
+  int total_pages;
+  //bool freed;
 } pg_hdr_t;
 
 /*
 typedef struct {
-	int id;
-	void* ptr;
-	int size;
+  int id;
+  void* ptr;
+  int size;
 }
 */
 
@@ -75,7 +77,14 @@ typedef struct {
 static kma_page_t* entry_page = NULL;
 
 /************Function Prototypes******************************************/
+void* kma_malloc(kma_size_t);
 void make_new_page();
+void add_to_free_list(blk_ptr_t*, int);
+//void remove_from_free_list(blk_ptr_t*);
+blk_ptr_t* find_first_fit(int);
+void PrintFreeList();
+void coalesce();
+void free_all();
 /************External Declaration*****************************************/
 
 /**************Implementation***********************************************/
@@ -83,80 +92,178 @@ void make_new_page();
 void*
 kma_malloc(kma_size_t size)
 {
-	//
-	if (size + sizeof(void*) > PAGESIZE) {
-		return NULL;
-	}
+  if (size + sizeof(void*) > PAGESIZE) {
+    return NULL;
+  }
 
-	if (entry_page == NULL) {
-		make_new_page();
-	}
+  if (entry_page == NULL) {
+    kma_page_t* new_page = get_page();
 
-	blk_ptr_t* block = find_first_fit(size);
-	pg_hdr_t* current_page = (pg_hdr_t*)BASEADDR(block);
-	current_page->allocated_block++;
+    entry_page = new_page;
+    // add a pointer to the page structure at the beginning of the page
+    *((kma_page_t**)(new_page->ptr)) = new_page;
+    //page_header point to page space
+    pg_hdr_t* page_header = (pg_hdr_t*)(new_page->ptr);
+    page_header->free_list = (blk_ptr_t*)((void*)page_header + sizeof(pg_hdr_t));
+    page_header->allocated_block = 0;
+    page_header->freed_block = 0;
+    page_header->total_pages = 0;
+    blk_ptr_t* pos_to_add = (blk_ptr_t*)page_header->free_list;
+    int size_to_add = PAGESIZE - sizeof(pg_hdr_t);
+	  add_to_free_list(pos_to_add, size_to_add);
+  }
+  blk_ptr_t* block;
+  block = find_first_fit(size);
+  pg_hdr_t* first_page = (pg_hdr_t*)(entry_page->ptr);
+	(first_page->allocated_block)++;
 
-	return block;
-}
-
-void make_new_page() {
-	kma_page_t* new_page = get_page();
-
-	if (entry_page == NULL) {
-		entry_page = new_page;
-	}
-	// add a pointer to the page structure at the beginning of the page
-	*((kma_page_t**)(new_page->ptr)) = new_page;
-	//page_header point to page space
-	pg_hdr_t* page_header = (pg_hdr_t*)(new_page->ptr);
-	page_header->free_list = (blk_ptr_t*)((long int)page_header + sizeof(kma_page_t*));//sizeof what?
-	page_header->allocated_block = 0;
-	add_to_free_list(page_header->free_list, PAGESIZE - sizeof(kma_page_t*));
+  return (void*)block;
 }
 
 void add_to_free_list(blk_ptr_t* block, kma_size_t size) {
-	pg_hdr_t* current_page_header = (pg_hdr_t*)BASEADDR(block);
-	blk_ptr_t* current = current_page_header->free_list;
-	block->size = size;
-	block->prev = NULL;
-	block->next = NULL;
-	if (block == current) {
-		block->next = NULL;
-	}
-	else if (block > current) {
-		while(current->next != NULL) {
-			if (block < current) {
-				break;
-			}
-			current = current->next; 
+  pg_hdr_t* first_page_header = (pg_hdr_t*)(entry_page->ptr);
+  blk_ptr_t* current = first_page_header->free_list;
+  blk_ptr_t* prev = current;
+  block->size = size;
+
+  if (current == NULL) {
+  	first_page_header->free_list = block;
+    block->next = NULL;
+    return;
+  }
+  if (block == current) {
+  	first_page_header->free_list = block;
+  	block->next = NULL;
+  	return;
+  }
+  else if (block < current) {
+    block->next = first_page_header->free_list;
+    first_page_header->free_list = block;
+    return;
+  }
+  else {
+  	if (current->next == NULL) {
+  		current->next = block;
+  	}
+  	else {
+  		prev = first_page_header->free_list;
+  		current = current->next;
+		  while(current!= NULL) {
+		    if (block < current) {
+		      prev->next = block;
+		      block->next = current;
+		      return;
+		    }
+		    prev = current;
+		    current = current->next; 
+		  }
+		  prev->next = block;
+		  block->next = NULL;
 		}
-		if (block < current) {
-			block->prev = current->prev
-			block->next = current;
-			current->prev = block;
-			block->prev->next = block;
-			break;
-		}
-		else {
-			current->next = block;
-			block->prev = current;
-		}
-	}
+	}	
 }
 
-blk_ptr_t* find_first_fit(kma_size_t size) {
-	int min_size = sizeof(blk_ptr_t);
-	if (size < sizeof(blk_ptr_t)) {
-		size = 
-	}
+blk_ptr_t* find_first_fit(int size) {
+  int min_size = sizeof(blk_ptr_t);
+  if (size < sizeof(blk_ptr_t)) {
+    size = min_size;
+  }
+
+  pg_hdr_t* first_page_header = entry_page->ptr;
+
+  blk_ptr_t* prev = NULL;
+  blk_ptr_t* current = first_page_header->free_list;;
+  if (current->size >= size) {
+    if (current->size == size || current->size - size < min_size) {
+      first_page_header->free_list = current->next; 
+    }
+    else {
+    	first_page_header->free_list = current->next; 
+    	blk_ptr_t* pos_to_add = (blk_ptr_t*)((void*)current + size);
+    	int size_to_add = current->size - size;
+      add_to_free_list(pos_to_add, size_to_add);
+    }
+    return current;
+  }
+
+  prev = first_page_header->free_list;
+  current = current->next;
+  while(current != NULL) {
+    if (current->size >= size) {
+      if (current->size == size || current->size - size < min_size) {
+        prev->next = current->next; 
+      }
+      else {
+      	prev->next = current->next; 
+    		blk_ptr_t* pos_to_add = (blk_ptr_t*)((void*)current + size);
+    		int size_to_add = current->size - size;
+      	add_to_free_list(pos_to_add, size_to_add);
+      }
+      return current;
+    }
+    prev = current;
+    current = current->next;
+  }//while end
+  
+  kma_page_t* new_page = get_page();
+  *((kma_page_t**)(new_page->ptr)) = new_page;
+  pg_hdr_t* page_header = (pg_hdr_t*)(new_page->ptr);  
+  page_header->free_list = (blk_ptr_t*)((void*)page_header + sizeof(pg_hdr_t));
+  page_header->allocated_block = 0;
+  page_header->freed_block = 0;
+  page_header->total_pages = 0;
+  void* pos_to_add = (void*)page_header + sizeof(pg_hdr_t) + size;
+  int size_to_add = PAGESIZE - sizeof(pg_hdr_t)-size;
+  add_to_free_list((blk_ptr_t*)pos_to_add, size_to_add);
+
+  (first_page_header->total_pages)++;
+  return (blk_ptr_t*)((void*)new_page->ptr + sizeof(pg_hdr_t));
 }
-
-
+ 
 void
 kma_free(void* ptr, kma_size_t size)
 {
+  blk_ptr_t* block = (blk_ptr_t*)ptr;
+  add_to_free_list(block, size);
+ 	coalesce();
+//  pg_hdr_t* current_page = (pg_hdr_t*)BASEADDR(block);
+  pg_hdr_t* first_page = entry_page->ptr;
+  (first_page->freed_block)++;
 
+  if (first_page->allocated_block == first_page->freed_block) {
+    free_all();
+  }
+
+  return;
+}
+void free_all() {
+  pg_hdr_t* first_page = (pg_hdr_t*)(entry_page->ptr);
+  int num = first_page->total_pages;
+  int i = 0;
+  while(i <= num) {
+    pg_hdr_t* current_page = (pg_hdr_t*)((void*)first_page + i*PAGESIZE);
+    kma_page_t* page = (kma_page_t*)current_page->this;
+    free_page(page);
+    i++;
+  }
+  entry_page = NULL;
 }
 
+void coalesce() {
+	pg_hdr_t* first_page = (pg_hdr_t*)(entry_page->ptr);
+	if (first_page->free_list == NULL) {
+		return;
+	}
+	blk_ptr_t* current = first_page->free_list;
+	while (current->next != NULL) {
+		if ((void*)current + current->size == current->next) {
+			blk_ptr_t* current_next = current->next;
+			current->size = current->size + current_next->size;
+			current->next = current_next->next;
+			continue;
+		}
+		current = current->next;
+	}
+}
 
 #endif // KMA_RM
