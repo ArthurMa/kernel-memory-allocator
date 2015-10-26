@@ -59,9 +59,9 @@
  *  variables should be in all lower case. When initializing
  *  structures and arrays, line everything up in neat columns.
  */
-#define MINPOWER 3
-#define MINSIZE 8
-#define HDRSIZE 11
+#define MINPOWER 4
+#define MINSIZE 16
+#define HDRSIZE 10
 
 typedef struct blk_ptr{
   struct blk_ptr* next;
@@ -117,15 +117,19 @@ int next_power_of_two(int n) {
   }
   return p;
 }
-
+//---------KMA_MALLOC-----------//
+//need to consider extra size
 void* kma_malloc(kma_size_t size) {
   if (size + sizeof(void*) > PAGESIZE)  
     return NULL;
 
   if (entry_page == NULL)
     init_page();
-  //not consider page issue first
-  //size += sizeof(blk_ptr_t);
+  //change the size
+  size += sizeof(blk_ptr_t);
+  if (size < MINSIZE)
+    size = MINSIZE;
+
   mem_ctrl_t* controller = pg_master();
   void* block = find_fit(size);
   controller->allocated++;
@@ -133,21 +137,19 @@ void* kma_malloc(kma_size_t size) {
   return block;
 }
 
+//Done
 void init_page() {
-  //kma_page_t* new_page = get_page();
-
-  entry_page = get_page();
-
-  *((kma_page_t**)entry_page->ptr) = entry_page;
+  kma_page_t* new_page = get_page();
+  entry_page = new_page;
+  *((kma_page_t**)new_page->ptr) = new_page;
 
   mem_ctrl_t* controller = pg_master();
   
   controller->page_list = (pg_hdr_t*)((void*)controller + sizeof(mem_ctrl_t));
-  controller->page_list->this = (kma_page_t*)entry_page->ptr;
+  controller->page_list->this = (kma_page_t*)new_page->ptr;
   controller->page_list->prev = NULL;
   controller->page_list->next = NULL;
   controller->page_list->free_size = PAGESIZE - sizeof(kma_page_t*) - sizeof(mem_ctrl_t) - sizeof(pg_hdr_t);
-
   int i;
   for (i = 0; i < HDRSIZE; i++) {
     controller->free_list[i].size = 1 << (i + MINPOWER);
@@ -155,10 +157,8 @@ void init_page() {
   } 
   controller->allocated = 0;
   controller->freed = 0;
-
-  return;
 }
-
+//Done!!
 int get_index(int n) {
   n = next_power_of_two(n);
   int count = 0;
@@ -168,13 +168,10 @@ int get_index(int n) {
   }
   return count - MINPOWER - 1;
 }
-
+//need to consider extra size
 void* find_fit(kma_size_t size) {
-  mem_ctrl_t* controller = (mem_ctrl_t*)((void*)entry_page->ptr + sizeof(kma_page_t*));
-  
-//  if(size < MINSIZE)
-//    size = MINSIZE;
-  //size already round up to power of two
+  mem_ctrl_t* controller = pg_master();
+
   int ind = get_index(size);
   void* blk = NULL;
   bf_lst_t lst = controller->free_list[ind];
@@ -188,36 +185,12 @@ void* find_fit(kma_size_t size) {
 
   return blk;
 }
-
-pg_hdr_t* get_new_page() {
-  mem_ctrl_t* controller = (mem_ctrl_t*)((void*)entry_page->ptr + sizeof(kma_page_t*));
-  
-  kma_page_t* new_page = get_page();
-  *((kma_page_t**)new_page->ptr) = new_page;
-  pg_hdr_t* current = (pg_hdr_t*)((void*)new_page->ptr + sizeof(kma_page_t*));
-  current->this = (kma_page_t*)(new_page->ptr);
-  current->next = NULL;
-  current->free_size = PAGESIZE - sizeof(kma_page_t*) - sizeof(pg_hdr_t);
-
-  pg_hdr_t* p = controller->page_list;
-  while (p) {
-    if (!(p->next)) {
-      current->prev = p;
-      p->next = current;
-      break;
-    }
-    else
-      p = p->next;
-  }
-
-  return current;
-}
-
+//Done
 void* get_new_free_block(kma_size_t size) {
   if (size <= 4096) {
     size = next_power_of_two(size);
   }
-  mem_ctrl_t* controller = (mem_ctrl_t*)((void*)entry_page->ptr + sizeof(kma_page_t*));
+  mem_ctrl_t* controller = pg_master();
   pg_hdr_t* current_page = controller->page_list;
 
   while (current_page) {
@@ -229,51 +202,64 @@ void* get_new_free_block(kma_size_t size) {
       current_page = current_page->next;
   }
 
-  pg_hdr_t* new_page_header = get_new_page();
+  kma_page_t* new_page = get_page();
+  *((kma_page_t**)new_page->ptr) = new_page;
+  pg_hdr_t* current = (pg_hdr_t*)((void*)new_page->ptr + sizeof(kma_page_t*));
+  current->this = (kma_page_t*)(new_page->ptr);
+  current->next = NULL;
+  current->free_size = PAGESIZE - sizeof(kma_page_t*) - sizeof(pg_hdr_t);
+
+  pg_hdr_t* previous = controller->page_list;
+  while (previous) {
+    if (previous->next == NULL) {
+      current->prev = previous;
+      previous->next = current;
+      break;
+    }
+    else
+      previous = previous->next;
+  }
 
   if (size > 4096) {
-    new_page_header->free_size = 0;
-    return (void*)((void*)new_page_header + sizeof(pg_hdr_t));
+    current->free_size = 0;
+    return (void*)((void*)current + sizeof(pg_hdr_t));
   }
   else {
-    new_page_header->free_size = new_page_header->free_size - size;
-    return (void*)((void*)new_page_header->this + (PAGESIZE - new_page_header->free_size) - size); 
+    current->free_size -= size;
+    return (void*)((void*)new_page->ptr + (PAGESIZE - current->free_size) - size); 
   }
 }
-
+//Done
 void add_to_free_list(void* ptr, int size) {
-  mem_ctrl_t* controller = (mem_ctrl_t*)((void*)entry_page->ptr + sizeof(kma_page_t*));
+  mem_ctrl_t* controller = pg_master();
   int ind = get_index(size);
   ((blk_ptr_t*)ptr)->next = controller->free_list[ind].next;
   controller->free_list[ind].next = (blk_ptr_t*)ptr;
   return;
 }
-
-//need add_to_free_list
+//need to consider a lot what is the size to be
+//what is the size? 1. the original size 2. the malloc size
 void kma_free(void* ptr, kma_size_t size)
-{
-  //size += sizeof(blk_ptr_t);
-  //size = next_power_of_two(size);
-//  if (size < MINSIZE)
-//    size = MINSIZE;
-  add_to_free_list(ptr, size);
-  mem_ctrl_t* controller = (mem_ctrl_t*)((void*)entry_page->ptr + sizeof(kma_page_t*));
-  controller->freed++;
+{ 
+  size += sizeof(blk_ptr_t);
+  if (size < MINSIZE) 
+    size = MINSIZE;
 
+  add_to_free_list(ptr, size);
+  mem_ctrl_t* controller = pg_master();
+  controller->freed++;
   if (controller->freed == controller->allocated)
     free_all();
   return;
 }
 //Done
 void free_all() {
-  mem_ctrl_t* controller = (mem_ctrl_t*)((void*)entry_page->ptr + sizeof(kma_page_t*));
+  mem_ctrl_t* controller = pg_master();
   pg_hdr_t* current_page = controller->page_list;
-  pg_hdr_t* next_page;
   while (current_page) {
     kma_page_t* page = *(kma_page_t**)current_page->this;
-    next_page = current_page->next;
+    current_page = current_page->next;
     free_page(page);
-    current_page = next_page;
   }
   entry_page = NULL;
 }
