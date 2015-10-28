@@ -226,7 +226,6 @@ kma_free(void* ptr, kma_size_t size)
   blk_ptr_t* block = (blk_ptr_t*)ptr;
   add_to_free_list(block, size);
  	coalesce();
-//  pg_hdr_t* current_page = (pg_hdr_t*)BASEADDR(block);
   pg_hdr_t* first_page = entry_page->ptr;
   (first_page->freed_block)++;
 

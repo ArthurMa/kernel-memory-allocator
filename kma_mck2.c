@@ -66,7 +66,7 @@
 typedef struct blk_ptr{
   struct blk_ptr* next;
 } blk_ptr_t;
-
+//8 int and 32 bits 
 typedef struct pg_hdr{
   kma_page_t* this;
   struct pg_hdr* prev;
@@ -98,7 +98,6 @@ void init_page();
 void* get_new_page(kma_size_t);
 void add_to_free_list(void*, int);
 void free_all();
-void delete_node(int i,mem_ctrl_t* controller);
 /************External Declaration*****************************************/
 
 /**************Implementation***********************************************/
@@ -126,6 +125,7 @@ void* kma_malloc(kma_size_t size) {
   if (entry_page == NULL)
     init_page();
   //change the size
+  //printf("%d", sizeof(pg_hdr_t));
   size += sizeof(blk_ptr_t);
   if (size < MINSIZE)
     size = MINSIZE;
@@ -155,7 +155,7 @@ void init_page() {
     controller->free_list[i].size = 1 << (i + MINPOWER);
     controller->free_list[i].next = NULL;
   }
-  void* start = (void*)controller->page_list + sizeof(pg_hdr_t);
+  void* start = (void*)new_page->ptr + sizeof(kma_page_t*) + sizeof(mem_ctrl_t) + sizeof(pg_hdr_t);
   void* end = (void*)new_page->ptr + PAGESIZE;
   while(start+MINSIZE < end) {
   	add_to_free_list(start, MINSIZE);
@@ -193,8 +193,8 @@ void* find_fit(kma_size_t size) {
 }
 //Done
 void* get_new_page(kma_size_t size) {
-	if (size <= 4096)
-		size = next_power_of_two(size);
+	//if (size <= 4096)
+	size = next_power_of_two(size);
 
 	mem_ctrl_t* controller = pg_master();
   kma_page_t* new_page = get_page();
@@ -231,11 +231,11 @@ void* get_new_page(kma_size_t size) {
   }
 }
 //Done
-void add_to_free_list(void* ptr, int size) {
+void add_to_free_list(void* block, int size) {
   mem_ctrl_t* controller = pg_master();
   int ind = get_index(size);
-  ((blk_ptr_t*)ptr)->next = controller->free_list[ind].next;
-  controller->free_list[ind].next = (blk_ptr_t*)ptr;
+  ((blk_ptr_t*)block)->next = controller->free_list[ind].next;
+  controller->free_list[ind].next = (blk_ptr_t*)block;
   return;
 }
 //need to consider a lot what is the size to be
@@ -245,24 +245,20 @@ void kma_free(void* ptr, kma_size_t size)
 	size += sizeof(blk_ptr_t);
   if (size < MINSIZE) 
     size = MINSIZE;
-
+  //if (size <= 4096)
   add_to_free_list(ptr, size);
   mem_ctrl_t* controller = pg_master();
   controller->freed++;
-  if (controller->freed == controller->allocated)
-    free_all();
-  return;
-}
-//Done
-void free_all() {
-  mem_ctrl_t* controller = pg_master();
-  pg_hdr_t* current_page = controller->page_list;
-  while (current_page) {
-    kma_page_t* page = *(kma_page_t**)current_page->this;
-    current_page = current_page->next;
-    free_page(page);
+  if (controller->freed == controller->allocated){
+    pg_hdr_t* current_page = controller->page_list;
+  	while (current_page) {
+    	kma_page_t* page = *(kma_page_t**)current_page->this;
+    	current_page = current_page->next;
+    	free_page(page);
+  	}
+  	entry_page = NULL;
   }
-  entry_page = NULL;
+  return;
 }
 
 #endif // KMA_MCK2

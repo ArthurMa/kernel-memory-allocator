@@ -107,7 +107,6 @@ void* find_buddy(void* ptr, int size);
 bool is_bud_free(void* ptr, int size);
 void coalesce(void* ptr, kma_size_t size);
 void split_block(kma_size_t size, int index);
-void print_free_list();
 /************External Declaration*****************************************/
 
 /**************Implementation***********************************************/
@@ -138,7 +137,7 @@ void* kma_malloc(kma_size_t size) {
 
   mem_ctrl_t* controller = pg_master();
   void* block = find_fit(size);
-  set_bitmap(block, size);
+//  set_bitmap(block, size);
   controller->allocated++;
 
   return block;
@@ -251,19 +250,6 @@ int get_index(int n) {
   }
   return count - MINPOWER - 1;
 }
-void print_free_list() {
-	mem_ctrl_t* controller = pg_master();
-	blk_ptr_t* cur;
-	int i;
-	for (i = 0; i < HDRSIZE ; i++) {
-		cur = controller->free_list[i].next;
-		if (cur == NULL) printf("[%d]: %p\n",controller->free_list[i].size, cur);
-		while(cur != NULL) {
-			printf("[%d]: %p\n",controller->free_list[i].size, cur);
-			cur = cur->next;
-		}
-	}
-}
 
 void* find_fit(kma_size_t size) {
   mem_ctrl_t* controller = pg_master();
@@ -274,6 +260,7 @@ void* find_fit(kma_size_t size) {
   if (lst.next) {
     blk = (void*)lst.next;
     controller->free_list[ind].next = controller->free_list[ind].next->next;
+    set_bitmap(blk, size);
   }
   else {
     blk = get_new_free_block(size);
@@ -376,12 +363,6 @@ bool is_free(void* ptr, int size) {
 			return FALSE;
 	}
 	return TRUE;
-}
-void print_bitmap() {
-	mem_ctrl_t* controller = pg_master();
-	int i;
-	for (i = 0; i < MAPSIZE ; i++)
-  	printf("bitmap[%d]: %d\n", i, controller->page_list->bitmap[i]);
 }
 void delete_node(void* ptr, int size) {
 	mem_ctrl_t* controller = pg_master();

@@ -71,7 +71,7 @@ typedef struct pg_hdr{
   kma_page_t* this;
   struct pg_hdr* prev;
   struct pg_hdr* next;
-  int free_size;
+  int f_size;
 } pg_hdr_t;
 
 typedef struct {
@@ -98,7 +98,6 @@ void init_page();
 void* get_new_free_block(kma_size_t);
 void add_to_free_list(void*, int);
 void free_all();
-void delete_node(int i,mem_ctrl_t* controller);
 /************External Declaration*****************************************/
 
 /**************Implementation***********************************************/
@@ -149,7 +148,7 @@ void init_page() {
   controller->page_list->this = (kma_page_t*)new_page->ptr;
   controller->page_list->prev = NULL;
   controller->page_list->next = NULL;
-  controller->page_list->free_size = PAGESIZE - sizeof(kma_page_t*) - sizeof(mem_ctrl_t) - sizeof(pg_hdr_t);
+  controller->page_list->f_size = PAGESIZE - sizeof(kma_page_t*) - sizeof(mem_ctrl_t) - sizeof(pg_hdr_t);
   int i;
   for (i = 0; i < HDRSIZE; i++) {
     controller->free_list[i].size = 1 << (i + MINPOWER);
@@ -187,16 +186,14 @@ void* find_fit(kma_size_t size) {
 }
 //Done
 void* get_new_free_block(kma_size_t size) {
-  if (size <= 4096) {
-    size = next_power_of_two(size);
-  }
+  size = next_power_of_two(size);
   mem_ctrl_t* controller = pg_master();
   pg_hdr_t* current_page = controller->page_list;
 
   while (current_page) {
-    if (size <= 4096 && current_page->free_size > size) {
-      current_page->free_size = current_page->free_size - size;
-      return (void*)((void*)current_page->this + (PAGESIZE - current_page->free_size) - size);
+    if (size <= 4096 && current_page->f_size > size) {
+      current_page->f_size = current_page->f_size - size;
+      return (void*)((void*)current_page->this + (PAGESIZE - current_page->f_size) - size);
     }
     else 
       current_page = current_page->next;
@@ -207,7 +204,7 @@ void* get_new_free_block(kma_size_t size) {
   pg_hdr_t* current = (pg_hdr_t*)((void*)new_page->ptr + sizeof(kma_page_t*));
   current->this = (kma_page_t*)(new_page->ptr);
   current->next = NULL;
-  current->free_size = PAGESIZE - sizeof(kma_page_t*) - sizeof(pg_hdr_t);
+  current->f_size = PAGESIZE - sizeof(kma_page_t*) - sizeof(pg_hdr_t);
 
   pg_hdr_t* previous = controller->page_list;
   while (previous) {
@@ -221,20 +218,20 @@ void* get_new_free_block(kma_size_t size) {
   }
 
   if (size > 4096) {
-    current->free_size = 0;
+    current->f_size = 0;
     return (void*)((void*)current + sizeof(pg_hdr_t));
   }
   else {
-    current->free_size -= size;
-    return (void*)((void*)new_page->ptr + (PAGESIZE - current->free_size) - size); 
+    current->f_size -= size;
+    return (void*)((void*)new_page->ptr + (PAGESIZE - current->f_size) - size); 
   }
 }
 //Done
-void add_to_free_list(void* ptr, int size) {
+void add_to_free_list(void* block, int size) {
   mem_ctrl_t* controller = pg_master();
   int ind = get_index(size);
-  ((blk_ptr_t*)ptr)->next = controller->free_list[ind].next;
-  controller->free_list[ind].next = (blk_ptr_t*)ptr;
+  ((blk_ptr_t*)block)->next = controller->free_list[ind].next;
+  controller->free_list[ind].next = (blk_ptr_t*)block;
   return;
 }
 //need to consider a lot what is the size to be
@@ -248,20 +245,15 @@ void kma_free(void* ptr, kma_size_t size)
   add_to_free_list(ptr, size);
   mem_ctrl_t* controller = pg_master();
   controller->freed++;
-  if (controller->freed == controller->allocated)
-    free_all();
+  if (controller->freed == controller->allocated){
+    pg_hdr_t* current_page = controller->page_list;
+    while (current_page) {
+      kma_page_t* page = *(kma_page_t**)current_page->this;
+      current_page = current_page->next;
+      free_page(page);
+    }
+    entry_page = NULL;
+  }
   return;
 }
-//Done
-void free_all() {
-  mem_ctrl_t* controller = pg_master();
-  pg_hdr_t* current_page = controller->page_list;
-  while (current_page) {
-    kma_page_t* page = *(kma_page_t**)current_page->this;
-    current_page = current_page->next;
-    free_page(page);
-  }
-  entry_page = NULL;
-}
-
 #endif // KMA_P2FL

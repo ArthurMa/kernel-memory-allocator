@@ -112,7 +112,6 @@ void* find_buddy(void* ptr, int size);
 bool is_bud_free(void* ptr, int size);
 void coalesce(void* ptr, kma_size_t size);
 void split_block(kma_size_t size, int index);
-void print_free_list();
 /************External Declaration*****************************************/
 
 /**************Implementation***********************************************/
@@ -257,19 +256,6 @@ int get_index(int n) {
   }
   return count - MINPOWER - 1;
 }
-void print_free_list() {
-	mem_ctrl_t* controller = pg_master();
-	blk_ptr_t* cur;
-	int i;
-	for (i = 0; i < HDRSIZE ; i++) {
-		cur = controller->free_list[i].next;
-		if (cur == NULL) printf("[%d]: %p\n",controller->free_list[i].size, cur);
-		while(cur != NULL) {
-			printf("[%d]: %p\n",controller->free_list[i].size, cur);
-			cur = cur->next;
-		}
-	}
-}
 //if the bitmap is 1
 bool is_locally_free(void* ptr, int size) {
 	pg_hdr_t* current_page;
@@ -320,11 +306,8 @@ void split_block(kma_size_t size, int index) {
 	blk_ptr_t* current = lst.next;
 	int sz = (1 << (index + MINPOWER -1));
 	controller->free_list[index].next = controller->free_list[index].next->next;
-	//set_bitmap();
 	add_to_free_list((void*)current + sz, sz);
-	//unset_bitmap();
 	add_to_free_list((void*)current, sz);
-	//unset_bitmap();
 }
 
 void add_to_free_list(void* block, int size) {
@@ -398,7 +381,6 @@ void* find_buddy(void* ptr, int size) {
 	return (void*)(BASEADDR(ptr) + bud);
 
 }
-//Globaly free
 bool is_free(void* ptr, int size) {
 	pg_hdr_t* current_page;
 	if (BASEADDR(ptr) == entry_page->ptr)
@@ -414,12 +396,6 @@ bool is_free(void* ptr, int size) {
 			return FALSE;
 	}
 	return TRUE;
-}
-void print_bitmap() {
-	mem_ctrl_t* controller = pg_master();
-	int i;
-	for (i = 0; i < MAPSIZE ; i++)
-  	printf("bitmap[%d]: %d\n", i, controller->page_list->bitmap[i]);
 }
 void delete_node(void* ptr, int size) {
 	mem_ctrl_t* controller = pg_master();
